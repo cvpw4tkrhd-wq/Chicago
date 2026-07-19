@@ -180,16 +180,27 @@
   }
   .row-name-cell{
     position:sticky; left:0; z-index:2;
-    background:var(--felt); min-width:96px; text-align:left !important;
+    background:var(--felt); min-width:172px; text-align:left !important;
     border-radius:var(--radius-sm);
   }
-  .row-name{display:flex; align-items:center; gap:8px; padding:6px 4px;}
-  .row-name .suit{font-size:15px; color:var(--gold);}
-  .row-name .nm{font-size:13.5px; font-weight:600; line-height:1.15;}
-  .row-total{
-    font-family:'Fraunces', serif; font-size:17px; font-weight:700; color:var(--gold-bright);
+  .row-name{display:flex; align-items:center; gap:6px; padding:6px 8px;}
+  .row-name .suit{font-size:15px; color:var(--gold); flex:0 0 auto;}
+  .row-name .nm{
+    font-size:13px; font-weight:600; line-height:1.15;
+    max-width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  .row-total.reached{color:var(--green-ok);}
+  .chicago-badge{
+    flex:0 0 17px; width:17px; height:17px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:10.5px; font-weight:700; color:var(--gold-bright);
+    background:rgba(198,164,77,0.18); border:1px solid rgba(198,164,77,0.45);
+  }
+  .row-total-inline{
+    margin-left:auto; padding-left:6px;
+    font-family:'Fraunces', serif; font-size:16px; font-weight:700; color:var(--cream-dim);
+  }
+  .row-total-inline.reached{color:var(--green-ok);}
+  .row-total-inline.near{color:var(--gold-bright); text-shadow:0 0 10px rgba(224,192,110,0.45);}
 
   .score-cell{
     width:58px; height:58px;
@@ -372,7 +383,7 @@
 
     <button class="primary-btn" id="startGameBtn">Starta match</button>
     <div class="link-row"><button id="goHistoryFromSetup">Visa tidigare matcher</button></div>
-    <p class="footer-tag">Chicago Poängräknare · v1.1</p>
+    <p class="footer-tag">Chicago Poängräknare · v1.2</p>
   </section>
 
   <!-- GAME SCREEN -->
@@ -388,7 +399,7 @@
 
     <div class="win-banner" id="winBanner">
       <div class="wb-icon">🏆</div>
-      <div><strong id="winBannerName">—</strong> har nått målpoängen! Avsluta matchen eller fortsätt spela.</div>
+      <div><strong id="winBannerName">—</strong> har nått 52p <em>och</em> tagit en Chicago – matchen är vunnen! Avsluta eller fortsätt spela.</div>
     </div>
 
     <div class="board-scroll">
@@ -400,7 +411,7 @@
       <button class="secondary-btn" id="shareBtn">📤 Dela</button>
     </div>
     <button class="secondary-btn danger-btn" id="endGameBtn" style="width:100%;margin-top:10px;">Avsluta match</button>
-    <p class="footer-tag">Tryck på en ruta för att registrera resultat · v1.1</p>
+    <p class="footer-tag">Tryck på en ruta för att registrera resultat · v1.2</p>
   </section>
 
   <!-- HISTORY SCREEN -->
@@ -488,7 +499,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "1.1.0";
+  var APP_VERSION = "1.2.0";
   var LS_ACTIVE = "chicago_active_v1";
   var LS_HISTORY = "chicago_history_v1";
   var SUITS = ["♠","♥","♦","♣"];
@@ -509,7 +520,7 @@
   var TRICK_DEFS = [
     {key:"none", label:"Nej",            pts:0},
     {key:"five", label:"Sista sticket",  pts:5},
-    {key:"ten",  label:"Med tvåa",       pts:10}
+    {key:"ten",  label:"Med tvåa",       pts:7}
   ];
   var CHICAGO_DEFS = [
     {key:"none",    label:"Ej försökt",   pts:0},
@@ -659,6 +670,27 @@
     return best;
   }
 
+  function playerHasChicagoSuccess(g, playerId){
+    return g.rounds.some(function(r){
+      var res = r.results[playerId];
+      return res && res.chicago === "success";
+    });
+  }
+
+  function playerHasWon(g, playerId){
+    return getPlayerTotal(g, playerId) >= g.target && playerHasChicagoSuccess(g, playerId);
+  }
+
+  function eligibleWinner(g){
+    var best = null;
+    g.players.forEach(function(p){
+      if (!playerHasWon(g, p.id)) return;
+      var t = getPlayerTotal(g, p.id);
+      if (!best || t > best.total) best = {player:p, total:t};
+    });
+    return best;
+  }
+
   // ---------- statistics ----------
   function computeStats(g){
     return g.players.map(function(p){
@@ -751,6 +783,8 @@
     ctx.stroke();
 
     var winner = g.players.filter(function(p){ return p.id === g.winnerId; })[0];
+    var titleText = "Slutresultat";
+    if (winner) titleText = (g.winCondition === "points") ? (winner.name + " ledde") : (winner.name + " vann!");
 
     ctx.textAlign = "center";
     ctx.fillStyle = "#c6a44d";
@@ -759,7 +793,7 @@
 
     ctx.fillStyle = "#f4efe1";
     ctx.font = "600 60px 'Fraunces', serif";
-    ctx.fillText(winner ? (winner.name + " vann!") : "Slutresultat", W/2, 214);
+    ctx.fillText(titleText, W/2, 214);
 
     ctx.font = "400 24px 'Space Grotesk', sans-serif";
     ctx.fillStyle = "rgba(244,239,225,0.6)";
@@ -1004,16 +1038,16 @@
   function renderGameScreen(){
     $("#targetPill").textContent = "Mål: " + game.target + "p";
     renderBoard(game, $("#boardTable"), false);
-    var lead = leaderInfo(game);
-    var showBanner = !game.finished && lead && lead.total >= game.target;
+    var eligible = eligibleWinner(game);
+    var showBanner = !game.finished && !!eligible;
     var banner = $("#winBanner");
     banner.classList.toggle("show", !!showBanner);
     if (showBanner){
-      $("#winBannerName").textContent = lead.player.name;
-      if (bannerCelebratedId !== lead.player.id){
+      $("#winBannerName").textContent = eligible.player.name;
+      if (bannerCelebratedId !== eligible.player.id){
         fireConfetti();
         vib([30,50,30,50,120]);
-        bannerCelebratedId = lead.player.id;
+        bannerCelebratedId = eligible.player.id;
       }
     } else {
       bannerCelebratedId = null;
@@ -1032,7 +1066,7 @@
     if (h.key !== "none") badges += '<span>' + h.abbr + '</span>';
     if (res.trick !== "none") badges += '<span>★</span>';
     var chicagoMark = "";
-    if (res.chicago === "success") chicagoMark = '<span class="chicago-mark" style="color:#8fd6a4;">▲</span>';
+    if (res.chicago === "success") chicagoMark = '<span class="chicago-mark" style="color:#8fd6a4;">©</span>';
     if (res.chicago === "fail") chicagoMark = '<span class="chicago-mark" style="color:var(--red-bright);">▼</span>';
     var displayVal = h.special ? h.icon : String(pts);
     var valClass = "val" + (pts < 0 ? " neg" : "");
@@ -1042,15 +1076,21 @@
   }
 
   function renderBoard(g, tableEl, readonly){
-    var html = '<thead><tr><th class="col-head" style="text-align:left;">Spelare</th><th class="col-head">Tot</th>';
+    var html = '<thead><tr><th class="col-head" style="text-align:left;">Spelare</th>';
     g.rounds.forEach(function(r,i){ html += '<th class="col-head">R' + (i+1) + '</th>'; });
     if (!readonly) html += '<th class="col-head"></th>';
     html += '</tr></thead><tbody>';
     g.players.forEach(function(p){
       var total = getPlayerTotal(g, p.id);
-      var reached = total >= g.target;
-      html += '<tr><td class="row-name-cell"><div class="row-name"><span class="suit">' + p.suit + '</span><span class="nm">' + escapeHtml(p.name) + '</span></div></td>';
-      html += '<td><span class="row-total' + (reached?" reached":"") + '">' + total + '</span></td>';
+      var won = playerHasWon(g, p.id);
+      var near = !won && total >= g.target;
+      var hasChicago = playerHasChicagoSuccess(g, p.id);
+      html += '<tr><td class="row-name-cell"><div class="row-name">' +
+        '<span class="suit">' + p.suit + '</span>' +
+        '<span class="nm">' + escapeHtml(p.name) + '</span>' +
+        (hasChicago ? '<span class="chicago-badge" title="Har tagit en Chicago">©</span>' : '') +
+        '<span class="row-total-inline' + (won ? " reached" : (near ? " near" : "")) + '">' + total + '</span>' +
+        '</div></td>';
       g.rounds.forEach(function(r, ri){
         html += cellHtml(p.id, ri, r.results[p.id], readonly);
       });
@@ -1102,14 +1142,21 @@
   });
 
   $("#endGameBtn").addEventListener("click", function(){
+    var eligible = eligibleWinner(game);
+    var fallback = leaderInfo(game);
+    var text = eligible
+      ? ("Matchen sparas i historiken med " + eligible.player.name + " som vinnare (52p + tagen Chicago).")
+      : ("Ingen spelare har både nått " + game.target + "p och tagit en Chicago ännu. Matchen sparas med " +
+         (fallback ? fallback.player.name : "—") + " som poängledare, men utan officiell vinst.");
     showConfirm({
       icon:"🏁", title:"Avsluta matchen?",
-      text:"Matchen sparas i historiken med nuvarande ställning. Detta går inte att ångra.",
+      text: text + " Detta går inte att ångra.",
       okLabel:"Avsluta match",
       onOk:function(){
-        var lead = leaderInfo(game);
+        var pick = eligible || fallback;
         game.finished = true;
-        game.winnerId = lead ? lead.player.id : null;
+        game.winnerId = pick ? pick.player.id : null;
+        game.winCondition = eligible ? "chicago" : "points";
         game.endedAt = new Date().toISOString();
         pushToHistory(game);
         clearActive();
@@ -1125,6 +1172,7 @@
 
   function finishGameWithSpecialWin(playerId, key){
     game.specialWin = key;
+    game.winCondition = "special";
     game.finished = true;
     game.winnerId = playerId;
     game.endedAt = new Date().toISOString();
@@ -1257,10 +1305,11 @@
     el.innerHTML = hist.map(function(g){
       var winner = g.players.filter(function(p){ return p.id === g.winnerId; })[0];
       var winnerName = winner ? winner.name : "—";
+      var verb = g.winCondition === "points" ? " hade flest poäng" : " vann";
       var sub = g.players.length + " spelare · " + fmtDate(g.endedAt || g.startedAt);
       return '<button class="history-item" data-id="' + g.id + '" style="width:100%;text-align:left;">' +
-        '<div class="hi-icon">' + (g.specialWin === "royal" ? "👑" : (g.specialWin === "fargstege" ? "🏆" : "♠")) + '</div>' +
-        '<div class="hi-body"><p class="hi-title">' + escapeHtml(winnerName) + ' vann</p><p class="hi-sub">' + sub + '</p></div>' +
+        '<div class="hi-icon">' + (g.specialWin === "royal" ? "👑" : (g.specialWin === "fargstege" ? "🏆" : (g.winCondition === "points" ? "🔸" : "©"))) + '</div>' +
+        '<div class="hi-body"><p class="hi-title">' + escapeHtml(winnerName) + verb + '</p><p class="hi-sub">' + sub + '</p></div>' +
         '<div class="hi-arrow">›</div></button>';
     }).join("");
     $all(".history-item", el).forEach(function(btn){
